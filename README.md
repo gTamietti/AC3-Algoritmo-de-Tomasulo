@@ -108,8 +108,25 @@ O log mostra a emissão da primeira instrução e o mapeamento do registrador de
 --- Fila de Instrucoes (PC=2/6) --- Proxima a emitir: SUB F7,F0,F3
 
 
-### 3. Resultados Finais
+### 4. Exemplo de Resultados Finais
 
-Ao final da simulação, o tempo total é exibido, seguido pelos valores finais em cada registrador:
+Após o processamento de todas as instruções e o término do último estágio de *Writeback*, o simulador exibe o tempo total da execução e o estado final do **Banco de Registradores** (`reg_file`).
 
---- Simulacao Concluida em XX Ciclos --- Valores dos Registradores (F0 - F8): F0: 10.0000 F1: 30.0000 F2: 20.0000 F3: -1.5.0000 ...
+| Detalhe | Valor | Significado |
+| :--- | :--- | :--- |
+| **Total de Ciclos** | **58** | O tempo total de clock (latência) necessário para a conclusão de todo o programa. |
+
+#### Valores Finais dos Registradores (F0 - F8)
+
+Esta tabela mostra o resultado de todos os cálculos realizados pelas instruções:
+
+F0: 10.0000 (Valor Inicial) F1: 30.0000 F2: 20.0000 F3: -1.5000 F4: 4.0000 (Valor Inicial) F5: 5.0000 (Valor Inicial) F6: 12.0000 F7: 7.0000 F8: -30.0000
+
+
+***
+
+#### Interpretação dos Resultados Finais:
+
+* **Valores Modificados:** Registradores como `F1`, `F2`, `F3`, `F6`, `F7` e `F8` contêm os resultados finais das operações (ADD, SUB, MUL, DIV), demonstrando que as instruções foram executadas com sucesso, mesmo que **fora de ordem**.
+* **Valores Iniciais Preservados:** Registradores como `F0`, `F4` e `F5` mantiveram seus valores originais porque não foram alvos de nenhuma instrução de escrita (`DEST`).
+* **Prova de Tomasulo:** O fato de o tempo total ser **58 ciclos** (e não a soma sequencial de todas as latências) prova que a execução foi **paralela** e **fora de ordem**, com o algoritmo Tomasulo eliminando as dependências de forma eficiente.
