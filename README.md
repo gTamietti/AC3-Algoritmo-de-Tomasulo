@@ -1,23 +1,28 @@
-# 💻 Simulador do Algoritmo de Tomasulo em C++
+# 🚀 Simulador do Algoritmo de Tomasulo com Comprometimento (Commitment)
 
-Este projeto implementa um simulador de pipeline superescalar com execução fora de ordem, seguindo o rigoroso algoritmo de Tomasulo. Ele é projetado para exibir o estado completo do pipeline (Estações de Reserva e Status dos Registradores) **ciclo a ciclo** no terminal.
+Este projeto implementa um simulador de pipeline **superescalar** com **Execução Fora-de-Ordem** utilizando o algoritmo de Tomasulo, estendido com um mecanismo de **Comprometimento (Commitment)**. Esta arquitetura é essencial para processadores modernos, pois garante a **Terminação Em-Ordem** das instruções, resolvendo exceções e garantindo a exatidão do estado arquitetural (registradores e memória).
 
-## ⚙️ Configuração do Simulador
+---
 
-A arquitetura simulada possui a seguinte capacidade e latência:
+## ⚙️ Configuração do Simulador e Arquitetura
 
-| Unidade Funcional | Estações de Reserva (Slots) | Latência (Ciclos) |
-| :---------------- | :-------------------------- | :---------------- |
-| ADD/SUB           | 3                           | 2                 |
-| MUL               | 2                           | 10                |
-| DIV               | 2                           | 40                |
+A arquitetura simulada possui a seguinte capacidade, latência e componentes:
+
+| Componente | Estações de Reserva (Slots) | Latência (Ciclos) | Notas |
+| :--- | :--- | :--- | :--- |
+| **ADD/SUB** | 3 | 2 | Unidade Funcional de Adição/Subtração |
+| **MUL/DIV** | 2 | 10 (MUL) / 40 (DIV) | Unidade Funcional de Multiplicação/Divisão |
+| **L/S Buffers** | 2 | 3 (Memória) | Buffers para operações LOAD/STORE |
+| **ROB (Implícito)** | Fila de Instruções | - | Rastreia o estado para garantir o Commit In-Order |
+
+---
 
 ## 🚀 Como Compilar e Executar
 
-1.  **Compilar:** Utilize o compilador `g++` com o padrão C++11 (ou superior).
+1.  **Compilar:** Utilize o compilador `g++` com o padrão C++14 ou superior para suportar recursos modernos da linguagem.
 
     ```bash
-    g++ -o simulador main.cpp simulator.cpp -std=c++11
+    g++ -o simulador main.cpp simulator.cpp -std=c++14
     ```
 
 2.  **Executar:** Passe o arquivo de texto contendo a lista de instruções (ex: `instructions.txt`) como argumento:
@@ -26,107 +31,134 @@ A arquitetura simulada possui a seguinte capacidade e latência:
     ./simulador instructions.txt
     ```
 
-***
+---
 
-## 🧠 Explicação Detalhada do Algoritmo e dos Estágios
+## 🧠 Explicação Detalhada do Algoritmo e dos Estágios (Ciclo a Ciclo)
 
-O simulador implementa os três estágios de pipeline do algoritmo de Tomasulo, que permitem a execução fora de ordem e o tratamento de dependências.
+O pipeline é executado rigorosamente na ordem: **COMMIT $\rightarrow$ WRITEBACK $\rightarrow$ EXECUTE $\rightarrow$ ISSUE**.
 
-### 1. Estágio de *Issue* (Emissão)
+### 1. Estágio de *Commit* (Comprometimento)
 
--   **Lógica:** A instrução é lida da fila e alocada na primeira Estação de Reserva (RS) livre.
--   **Renomeação de Registradores (Resolução de RAW):**
-    -   Se o operando estiver pronto, seu **valor** é copiado para `Vj` ou `Vk`.
-    -   Se o operando estiver sendo produzido por outra RS (ex: `Mult1`), o **nome do produtor** é copiado para `Qj` ou `Qk`, forçando a espera.
--   **Status (Qi):** O registrador de destino (`DEST`) é marcado com o nome da RS recém-emitida (ex: `F6: Add1`), implementando a renomeação.
+Este estágio final garante que os resultados permanentes sejam escritos no estado arquitetural na ordem sequencial, semelhante à função do *Reorder Buffer (ROB)*:
 
-### 2. Estágio de *Execute* (Execução)
+* **Lógica:** Analisa a instrução mais antiga na Fila de Instruções.
+* **Condição:** A instrução deve estar no estado **WRITE\_RESULT**.
+* **Ação:** A instrução é promovida para **COMMITTED**. Para **STORE**, a alteração na memória é formalmente confirmada neste ponto.
+* **Terminação Em-Ordem:** As instruções devem comitar na ordem em que foram emitidas.
 
--   **Condição de Início:** A execução só começa se a RS estiver `busy` **E** se `Qj` e `Qk` estiverem vazios (`""`).
--   **Latência de Execução:** O contador regressivo (`cycles_remaining`) é iniciado com a latência da UF. Quando chega a `0`, o resultado é calculado e a RS é marcada com `ready_to_writeback = true`.
+### 2. Estágio de *Writeback* (Escrita)
 
-### 3. Estágio de *Writeback* (Escrita)
+* **Lógica:** Uma única RS ou L/S (LOAD/STORE) pronta é selecionada para transmitir seu resultado pelo **Barramento Comum de Dados (CDB)**.
+* **Broadcast (CDB):**
+    * O resultado é gravado no **Banco de Registradores** (`reg_file`), resolvendo a renomeação para o destino.
+    * Todas as RSs/L/S em espera capturam o valor, limpando seus campos de produtor (`Qj`/`Qk`).
+* **Atualização de Estado:** A instrução é marcada como **WRITE\_RESULT** (Pronta para Commit).
+* A RS/L/S é liberada (`busy = false`).
 
--   **Lógica:** Uma única RS pronta é selecionada para escrever no Barramento Comum de Dados (CDB).
--   **Broadcast (CDB):** O resultado é transmitido para:
-    1.  **Banco de Registradores:** O resultado é gravado no `reg_file[DEST]` **somente** se o `reg_status[DEST]` ainda apontar para a RS que está escrevendo (proteção contra perigos WAW e WAR).
-    2.  **Estações de Reserva em Espera:** O resultado é copiado para os campos `Vj` ou `Vk` de todas as outras RSs que estavam esperando por esse valor (o campo `Qj` ou `Qk` é limpo).
--   A RS que transmitiu é limpa e liberada (`busy = false`).
+### 3. Estágio de *Execute* (Execução)
 
-***
+* **Aritmética:** Inicia ou continua se os valores dos operandos estiverem disponíveis (`Qj` e `Qk` vazios).
+* **Load/Store (L/S):**
+    * **Cálculo de Endereço:** Calculado assim que a base estiver disponível.
+    * **Perigo de Memória (RAW):** Para **LOAD**, a execução é paralisada se um **STORE** anterior para o mesmo endereço estiver esperando o Writeback, garantindo a ordem dos acessos à memória.
 
-## 📊 Como Ler a Saída do Log (Terminal)
+### 4. Estágio de *Issue* (Emissão)
 
-O log é a parte mais importante, mostrando o estado em tempo real:
+* **Lógica:** A próxima instrução é alocada na primeira Estação de Reserva/Buffer L/S livre.
+* **Renomeação:** Dependências de dados são resolvidas: operando pronto gera **valor** (`Vj`/`Vk`); operando pendente gera **nome do produtor** (`Qj`/`Qk`).
+* **Status (Qi):** O registrador de destino é marcado com o nome da RS/L/S recém-emitida.
 
-| Coluna | Descrição | Valores de Exemplo |
-| :----- | :--- | :--- |
-| **Busy** | Indica se a RS está ocupada. | `Sim` / `Nao` |
-| **Op** | A operação em execução. | `ADD` / `DIV` |
-| **Vj/Vk** | O **valor** do operando, se estiver pronto. | `10.00` / `5.50` |
-| **Qj/Qk** | O **nome da RS** que produzirá o operando (se a RS estiver esperando). | `Add1` / `Mult2` / *vazio* (`""`) |
-| **Ciclos** | Estado atual da execução. | `WB` (Pronto p/ Escrita) / `2` (Faltam 2 ciclos) |
-| **Qi** | No Status dos Registradores, indica o produtor do valor. | `Pronto` / `Mult1` |
+---
 
-***
+## 🛠️ Detalhes da Implementação (C++ Pseudocódigo)
 
-## 📝 Exemplo de Simulação
+Abaixo estão trechos de pseudocódigo em C++ que ilustram a lógica central dos estágios críticos do simulador.
 
-### 1. Instruções de Entrada (`instructions.txt`)
+### Função `Simulator::commit()`
 
-ADD F6 F0 F2 SUB F7 F0 F3 MUL F2 F4 F5 ADD F1 F2 F0 SUB F8 F7 F1 DIV F3 F8 F2
+A lógica de Commit verifica a instrução mais antiga (`committed_inst_count`) para garantir a Terminação Em-Ordem.
 
+```cpp
+void Simulator::commit() {
+    if (committed_inst_count < instruction_queue.size()) {
+        Instruction& inst = instruction_queue[committed_inst_count];
+        
+        // Só pode comitar se o resultado já foi escrito (WRITE_RESULT)
+        if (inst.state == InstrState::WRITE_RESULT) {
+            
+            // Lógica de confirmação da escrita na memória (STORE)
+            if (inst.op_code == "STORE") {
+                // Se fosse um ROB explícito, a escrita na Memória ocorreria aqui.
+                // No modelo implícito, confirmamos o estado.
+                // Memory[inst.address] = inst.value; 
+            }
 
-### 2. Exemplo de Saída (Ciclo 1)
+            inst.state = InstrState::COMMITTED;
+            inst.commit_cycle = current_cycle;
+            committed_inst_count++; // Avança a janela de Commit
+        }
+    }
+}
+```
 
-O log mostra a emissão da primeira instrução e o mapeamento do registrador de destino (`F6: Add1`):
+## 📊 Status da Instrução e Tempos (Log)
 
---- CICLO 1 --- [WB] Ninguem transmitindo resultado. [EXEC] Nenhuma RS pronta para iniciar/decrementar. [ISSUE] Emitindo (1/6) ADD F6,F0,F2 para Add1
+O log final exibe a rastreabilidade completa de cada instrução através do pipeline estendido:
 
-### 📝 Estações de Reserva (Janela de Instruções)
+| Coluna | Descrição |
+| :--- | :--- |
+| **Issue** | Ciclo em que a instrução foi emitida para RS/L/S. |
+| **ExecS** | Ciclo em que a execução (na UF ou Endereço) começou. |
+| **ExecE** | Ciclo em que a execução terminou (último ciclo antes do WB). |
+| **Write** | Ciclo em que o resultado foi transmitido no CDB (Writeback). |
+| **Commit** | **Ciclo em que a instrução foi formalmente finalizada no estado arquitetural.** |
 
-| Nome | Busy | Op | Vj | Vk | Qj | Qk | Ciclos |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| Add1 | Sim | ADD | 10.00 | 2.00 | "" | "" | - |
-| Add2 | Nao | "" | "" | "" | "" | "" | - |
-| Add3 | Nao | "" | "" | "" | "" | "" | - |
-| Mult1 | Nao | "" | "" | "" | "" | "" | - |
-| Mult2 | Nao | "" | "" | "" | "" | "" | - |
+---
 
-***
+## 📝 Resultado da Simulação Final (Ciclo 50)
 
-#### Legenda da Tabela:
+### 1. Instruções de Entrada
 
-* **Vj/Vk**: O **valor** do operando, se estiver pronto para uso. Se houver uma dependência, será substituído por `""`.
-* **Qj/Qk**: **Nome da Estação de Reserva** que irá produzir o operando necessário (dependência RAW). `""` (vazio) significa que o operando está pronto.
-* **Ciclos**:
-    * `-`: Não iniciado, ou a RS está livre.
-    * `Nº > 0`: Ciclos restantes de execução.
-    * `WB`: A execução terminou e a instrução está pronta para o *Writeback* no CDB.
---- Status dos Registradores (Qi) --- | F0: Pronto | F1: Pronto | F2: Pronto | F3: Pronto | ... | F6: Add1 | ... |
+O *trace* de instruções demonstrou o tratamento de dependências de dados (`RAW`) e um perigo de memória (`LOAD` após `STORE` no mesmo endereço).
 
---- Fila de Instrucoes (PC=2/6) --- Proxima a emitir: SUB F7,F0,F3
-
-
-### 4. Exemplo de Resultados Finais
-
-Após o processamento de todas as instruções e o término do último estágio de *Writeback*, o simulador exibe o tempo total da execução e o estado final do **Banco de Registradores** (`reg_file`).
-
-| Detalhe | Valor | Significado |
-| :--- | :--- | :--- |
-| **Total de Ciclos** | **58** | O tempo total de clock (latência) necessário para a conclusão de todo o programa. |
-
-#### Valores Finais dos Registradores (F0 - F8)
-
-Esta tabela mostra o resultado de todos os cálculos realizados pelas instruções:
-
-F0: 10.0000 (Valor Inicial) F1: 30.0000 F2: 20.0000 F3: -1.5000 F4: 4.0000 (Valor Inicial) F5: 5.0000 (Valor Inicial) F6: 12.0000 F7: 7.0000 F8: -30.0000
+LOAD F6, 4(F1) LOAD F2, 8(F1) ADD F0, F6, F2 MUL F4, F0, F8 SUB F8, F0, F4 STORE F8, 1000(F0) LOAD F6, 1000(F0) // Dependência de memória do STORE acima DIV F4, F0, F2
 
 
-***
+### 2. Resultados Finais
 
-#### Interpretação dos Resultados Finais:
+A simulação completa do *trace* foi concluída em **50 Ciclos**.
 
-* **Valores Modificados:** Registradores como `F1`, `F2`, `F3`, `F6`, `F7` e `F8` contêm os resultados finais das operações (ADD, SUB, MUL, DIV), demonstrando que as instruções foram executadas com sucesso, mesmo que **fora de ordem**.
-* **Valores Iniciais Preservados:** Registradores como `F0`, `F4` e `F5` mantiveram seus valores originais porque não foram alvos de nenhuma instrução de escrita (`DEST`).
-* **Prova de Tomasulo:** O fato de o tempo total ser **58 ciclos** (e não a soma sequencial de todas as latências) prova que a execução foi **paralela** e **fora de ordem**, com o algoritmo Tomasulo eliminando as dependências de forma eficiente.
+--- Simulacao Concluida em 50 Ciclos ---
+
+Valores Finais dos Registradores:
+  F0: 0.0000
+  F1: 11.0000
+  F2: 12.0000
+  F3: 13.0000
+  F4: 0.0000
+  F5: 15.0000
+  F6: 16.0000
+  F7: 17.0000
+  F8: 0.0000
+
+Conteudo Final da Memoria (Enderecos Modificados):
+  [1000]: 0.0000
+  [1004]: 60.0000
+  [1008]: 70.0000
+
+### 3. Tabela Detalhada do Status da Instrução
+
+## 📊 Tabela Detalhada do Status da Instrução
+
+Esta tabela rastreia o ciclo exato em que cada instrução completou os estágios do pipeline estendido (Issue, Execução, Writeback e **Commit**).
+
+| ID | OP | Estado Final | Issue | ExecS | ExecE | Write | **Commit** | Comportamento Observado |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| 0 | LOAD | **COMMITTED** | 1 | 2 | 5 | 5 | **5** | Primeiro Commit. |
+| 1 | LOAD | **COMMITTED** | 1 | 2 | 5 | 5 | **6** | Commit em ordem, esperando ID 0. |
+| 2 | ADD | **COMMITTED** | 2 | 6 | 7 | 8 | **9** | RAW resolvido. |
+| 3 | MUL | **COMMITTED** | 3 | 8 | 17 | 18 | **19** | Longa Execução (10 ciclos). |
+| 4 | SUB | **COMMITTED** | 4 | 18 | 19 | 20 | **20** | RAW resolvido. |
+| 5 | STORE | **COMMITTED** | 5 | 20 | 23 | 24 | **25** | Escrita na Memória [1000] formalizada. |
+| 6 | LOAD | **COMMITTED** | 6 | 25 | 28 | 29 | **30** | **Perigo de Memória:** Esperou o **Commit** do STORE 5 (C.25). |
+| 7 | DIV | **COMMITTED** | 7 | 20 | 49 | 50 | **50** | **Execução Fora-de-Ordem:** Começou no C.20, mas só Comitou no C.50. |
