@@ -70,37 +70,6 @@ Este estágio final garante que os resultados permanentes sejam escritos no esta
 
 ---
 
-## 🛠️ Detalhes da Implementação (C++ Pseudocódigo)
-
-Abaixo estão trechos de pseudocódigo em C++ que ilustram a lógica central dos estágios críticos do simulador.
-
-### Função `Simulator::commit()`
-
-A lógica de Commit verifica a instrução mais antiga (`committed_inst_count`) para garantir a Terminação Em-Ordem.
-
-```cpp
-void Simulator::commit() {
-    if (committed_inst_count < instruction_queue.size()) {
-        Instruction& inst = instruction_queue[committed_inst_count];
-        
-        // Só pode comitar se o resultado já foi escrito (WRITE_RESULT)
-        if (inst.state == InstrState::WRITE_RESULT) {
-            
-            // Lógica de confirmação da escrita na memória (STORE)
-            if (inst.op_code == "STORE") {
-                // Se fosse um ROB explícito, a escrita na Memória ocorreria aqui.
-                // No modelo implícito, confirmamos o estado.
-                // Memory[inst.address] = inst.value; 
-            }
-
-            inst.state = InstrState::COMMITTED;
-            inst.commit_cycle = current_cycle;
-            committed_inst_count++; // Avança a janela de Commit
-        }
-    }
-}
-```
-
 ## 📊 Status da Instrução e Tempos (Log)
 
 O log final exibe a rastreabilidade completa de cada instrução através do pipeline estendido:
@@ -162,3 +131,4 @@ Esta tabela rastreia o ciclo exato em que cada instrução completou os estágio
 | 5 | STORE | **COMMITTED** | 5 | 20 | 23 | 24 | **25** | Escrita na Memória [1000] formalizada. |
 | 6 | LOAD | **COMMITTED** | 6 | 25 | 28 | 29 | **30** | **Perigo de Memória:** Esperou o **Commit** do STORE 5 (C.25). |
 | 7 | DIV | **COMMITTED** | 7 | 20 | 49 | 50 | **50** | **Execução Fora-de-Ordem:** Começou no C.20, mas só Comitou no C.50. |
+
