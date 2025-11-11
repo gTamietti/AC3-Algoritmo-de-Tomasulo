@@ -11,7 +11,6 @@ std::string Simulator::get_register_name(int index) {
 }
 
 // --- Construtor ---
-// --- Construtor ---
 Simulator::Simulator() 
     : cycle(0), pc(0), simulation_complete(false), committed_inst_count(0) {
 
