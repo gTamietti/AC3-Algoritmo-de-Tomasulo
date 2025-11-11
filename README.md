@@ -19,9 +19,9 @@ A simulação reproduz o comportamento de um **pipeline superescalar**, evidenci
 ## 💾 Estado Inicial do Sistema
 
 ### 🧮 Registradores (F0–F8)
-Inicializados sequencialmente:
+Inicializados sequencialmente do F1 ao F7:
 ```
-F0 = 10.0
+F0 = 100.0
 F1 = 11.0
 F2 = 12.0
 F3 = 13.0
@@ -29,7 +29,7 @@ F4 = 14.0
 F5 = 15.0
 F6 = 16.0
 F7 = 17.0
-F8 = 18.0
+F8 = 2.0
 ```
 
 ### 🧠 Memória Simulada
