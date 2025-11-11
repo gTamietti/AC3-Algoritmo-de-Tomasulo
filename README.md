@@ -190,11 +190,10 @@ O resultado mostra a robustez do modelo, simulando com precisão o comportamento
 ---
 
 ## 🧑‍💻 Autor e Informações
-
-**Autor:** Gabriel Tamietti Mauro  
+ 
 **Disciplina:** Arquitetura de Computadores III  
 **Trabalho:** Implementação do Algoritmo de Tomasulo com Commitment  
-**Instituição:** [Seu curso/universidade aqui]  
+**Instituição:** PUC MINAS (Unidade Lourdes) 
 
 ---
 
