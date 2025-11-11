@@ -165,38 +165,6 @@ F8 = -30.0000
 > `STORE F8, 1000(F0)` → 1000 + F0(30) = **1030**  
 > e o valor armazenado foi `F8 = -30.0`.
 
----
-
-## 🧠 Análise e Conclusão
-
-✅ O simulador reproduz corretamente:
-- **Execução fora de ordem (Out-of-Order)** com dependências de dados e de memória;
-- **Commit in-order (em ordem de emissão)**;
-- **Propagação via CDB (Common Data Bus)**;
-- **Renomeação dinâmica de registradores (Qi)**;
-- **Detecção e resolução de perigos de memória** (RAW, WAR, WAW);
-- **Visualização ciclo a ciclo** de todas as estruturas (RS, LS, Registradores, Instruções).
-
-O resultado mostra a robustez do modelo, simulando com precisão o comportamento do **algoritmo de Tomasulo** conforme descrito em *Hennessy & Patterson*.
-
----
-
-## 📚 Referências
-
-- Hennessy, J. L., & Patterson, D. A. *Arquitetura de Computadores – Uma Abordagem Quantitativa*.  
-- Materiais e slides sobre **superescalaridade** e **execução fora de ordem**.  
-- Implementações didáticas e repositórios educacionais sobre **Tomasulo com ROB**.
-
----
-
-## 🧑‍💻 Autor e Informações
- 
-**Disciplina:** Arquitetura de Computadores III  
-**Trabalho:** Implementação do Algoritmo de Tomasulo com Commitment  
-**Instituição:** PUC MINAS (Unidade Lourdes) 
-
----
-
 ### 🧩 Exemplo de Execução (Resumo Final)
 
 ```
