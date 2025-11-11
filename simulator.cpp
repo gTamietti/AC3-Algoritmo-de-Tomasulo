@@ -1,6 +1,9 @@
 #include "simulator.h"
 #include <iomanip>
 #include <algorithm>
+#include <regex>
+#include <cstring>
+
 
 // --- Funcao Auxiliar para Mapeamento de Registradores ---
 std::string Simulator::get_register_name(int index) {
@@ -8,7 +11,10 @@ std::string Simulator::get_register_name(int index) {
 }
 
 // --- Construtor ---
-Simulator::Simulator() : cycle(0), pc(0), simulation_complete(false), committed_inst_count(0) {
+// --- Construtor ---
+Simulator::Simulator() 
+    : cycle(0), pc(0), simulation_complete(false), committed_inst_count(0) {
+
     // Inicializa RS de ADD/SUB
     for (int i = 1; i <= ADD_RS_COUNT; ++i) {
         std::string name = "Add" + std::to_string(i);
@@ -30,79 +36,91 @@ Simulator::Simulator() : cycle(0), pc(0), simulation_complete(false), committed_
         ls_rs[name].name = name;
     }
 
-    // Inicializa Registradores F0 a F8
+    // Inicializa Registradores F0 a F8 com valores iniciais
     for (int i = 0; i <= 8; ++i) {
         std::string reg_name = get_register_name(i);
         reg_file[reg_name] = i + 10.0; 
         reg_status[reg_name] = ""; 
     }
-    
-    // Inicializa memoria (simulada)
+
+    // --- Valores iniciais específicos para teste ---
+    reg_file["F1"] = 100.0;   // Base address (para LOADs)
+    reg_file["F8"] = 2.0;     // Multiplicador
+
+    // --- Inicializa memória com dados reais ---
+    memory[132] = 10.0;   // endereço base 100 + offset 32
+    memory[136] = 20.0;   // endereço base 100 + offset 36
     memory[1000] = 50.0;
     memory[1004] = 60.0;
     memory[1008] = 70.0;
+
+    std::cout << "[Inicialização] Registradores e memória configurados:\n";
+    std::cout << "  F1 = 100.0 (base)\n";
+    std::cout << "  F8 = 2.0\n";
+    std::cout << "  mem[132] = 10.0\n";
+    std::cout << "  mem[136] = 20.0\n";
+    std::cout << "  mem[1000] = 50.0\n";
+    std::cout << "  mem[1004] = 60.0\n";
+    std::cout << "  mem[1008] = 70.0\n";
 }
 
+
 // --- Carregamento de Instrucoes (Popula ID e Estado Inicial) ---
+
 bool Simulator::load_instructions(const std::string& filename) {
     std::ifstream file(filename);
-    if (!file.is_open()) {
-        std::cerr << "Erro: Nao foi possivel abrir o arquivo: " << filename << std::endl;
+    if (!file) {
+        std::cerr << "Erro ao abrir arquivo de instrucoes: " << filename << std::endl;
         return false;
     }
-
     std::string line;
     int id_counter = 0;
+    std::regex r_load(R"(^\s*(LOAD|STORE)\s+(\w+)\s*,\s*([+-]?\d+)\((\w+)\)\s*$)", std::regex::icase);
+    std::regex r_rtype(R"(^\s*(\w+)\s+(\w+)\s*,\s*(\w+)\s*,\s*(\w+)\s*$)", std::regex::icase);
     while (std::getline(file, line)) {
-        if (line.empty() || line[0] == '#') continue; 
-
-        std::stringstream ss(line);
+        if (line.empty()) continue;
+        auto posc = line.find('#');
+        if (posc != std::string::npos) line = line.substr(0, posc);
+        if (line.find_first_not_of(" \t\r\n") == std::string::npos) continue;
+        std::smatch m;
         Instruction inst;
         inst.id = id_counter++;
         inst.state = NOT_ISSUED;
-        
-        std::string token;
-        ss >> inst.op >> token; 
-
-        if (inst.op == "LOAD" || inst.op == "STORE") {
-            inst.dest = token; 
-            std::string offset_base;
-            ss >> offset_base; 
-
-            size_t open_paren = offset_base.find('(');
-            size_t close_paren = offset_base.find(')');
-
-            if (open_paren != std::string::npos && close_paren != std::string::npos) {
-                inst.src2 = offset_base.substr(0, open_paren);
-                inst.src1 = offset_base.substr(open_paren + 1, close_paren - open_paren - 1);
-            } else {
-                std::cerr << "Erro de sintaxe em instrucao de memoria: " << inst.op << " " << inst.dest << ", " << offset_base << std::endl;
-                continue;
-            }
-
+        inst.value = 0.0;
+        inst.has_value = false;
+        inst.producer_tag = "";
+        inst.is_store = false;
+        if (std::regex_search(line, m, r_load)) {
+            inst.op = m[1];
+            std::string dest = m[2];
+            std::string offset = m[3];
+            std::string base = m[4];
+            inst.dest = dest;
+            inst.src1 = base; // base register
+            inst.src2 = offset; // store/load offset as string
+            if (strcasecmp(inst.op.c_str(), "STORE") == 0) inst.is_store = true;
+        } else if (std::regex_search(line, m, r_rtype)) {
+            inst.op = m[1];
+            inst.dest = m[2];
+            inst.src1 = m[3];
+            inst.src2 = m[4];
         } else {
-            size_t comma1 = token.find(',');
-            if (comma1 != std::string::npos) {
-                inst.dest = token.substr(0, comma1);
-                size_t comma2 = token.find(',', comma1 + 1);
-                if (comma2 != std::string::npos) {
-                    inst.src1 = token.substr(comma1 + 1, comma2 - comma1 - 1);
-                    inst.src2 = token.substr(comma2 + 1);
-                } else { 
-                    inst.src1 = token.substr(comma1 + 1);
-                    ss >> inst.src2;
-                }
-            } else { 
-                inst.dest = token;
-                ss >> inst.src1 >> inst.src2;
-            }
+            std::cerr << "Formato invalido de instrucao (ignorando): " << line << std::endl;
+            continue;
         }
-
+        auto ensure_reg = [&](const std::string &r) {
+            if (r.empty()) return;
+            if (!reg_file.count(r)) { reg_file[r] = 0.0; reg_status[r] = ""; }
+        };
+        ensure_reg(inst.dest);
+        ensure_reg(inst.src1);
+        ensure_reg(inst.src2);
         instruction_queue.push_back(inst);
     }
-    file.close();
+    std::cout << "Loaded " << instruction_queue.size() << " instructions from " << filename << std::endl;
     return true;
 }
+
 
 // --- Loop Principal da Simulacao ---
 void Simulator::run() {
@@ -152,34 +170,79 @@ void Simulator::run() {
 
 
 // --- NOVO ESTÁGIO: Commit (Comprometimento) ---
+
 void Simulator::commit() {
-    if (committed_inst_count >= instruction_queue.size()) {
-        std::cout << "  [COMMIT] Todas as instrucoes ja foram commited." << std::endl;
-        return;
-    }
+    // Commit in program order (instruction_queue as ROB)
+    while (committed_inst_count < (int)instruction_queue.size()) {
+        Instruction &inst = instruction_queue[committed_inst_count];
+        if (inst.state != WRITE_RESULT || !inst.has_value) break;
 
-    Instruction& inst = instruction_queue[committed_inst_count];
+        if (inst.is_store) {
+            // --- STORE ---
+            if (inst.address >= 0) {
+                memory[inst.address] = inst.value;
+                std::cout << "  [COMMIT] STORE ID" << inst.id
+                          << " mem[" << inst.address << "] = "
+                          << inst.value << std::endl;
+            } else {
+                std::cout << "  [COMMIT] STORE ID" << inst.id
+                          << " address not set." << std::endl;
+            }
 
-    // Condicao de Commit: In Order e Writeback Completo
-    if (inst.state == WRITE_RESULT) {
-        
-        // 1. Commit da instrucao (atualiza estado e tempo)
+        } else {
+            // --- LOAD / ALU instruction ---
+            if (!inst.dest.empty()) {
+                if (reg_status[inst.dest] == inst.producer_tag) {
+                    reg_file[inst.dest] = inst.value;
+                    reg_status[inst.dest] = "";
+
+                    // ✅ NOVO: Broadcast para liberar dependentes ainda esperando
+                    for (auto &r : add_rs) {
+                        if (r.second.qj == inst.producer_tag) {
+                            r.second.vj = inst.value;
+                            r.second.qj = "";
+                        }
+                        if (r.second.qk == inst.producer_tag) {
+                            r.second.vk = inst.value;
+                            r.second.qk = "";
+                        }
+                    }
+                    for (auto &r : mul_rs) {
+                        if (r.second.qj == inst.producer_tag) {
+                            r.second.vj = inst.value;
+                            r.second.qj = "";
+                        }
+                        if (r.second.qk == inst.producer_tag) {
+                            r.second.vk = inst.value;
+                            r.second.qk = "";
+                        }
+                    }
+                    for (auto &r : ls_rs) {
+                        if (r.second.base_producer == inst.producer_tag) {
+                            r.second.base_value = inst.value;
+                            r.second.base_producer = "";
+                        }
+                        if (r.second.store_producer == inst.producer_tag) {
+                            r.second.store_value = inst.value;
+                            r.second.store_producer = "";
+                        }
+                    }
+
+                    std::cout << "  [COMMIT] WRITE " << inst.dest
+                              << " = " << inst.value << " (ID"
+                              << inst.id << ")" << std::endl;
+                } else {
+                    std::cout << "  [COMMIT] Skipped write to "
+                              << inst.dest
+                              << " because reg_status changed."
+                              << std::endl;
+                }
+            }
+        }
+
         inst.state = COMMITTED;
         inst.commit_cycle = cycle;
         committed_inst_count++;
-
-        // 2. Acoes de Commit (principalmente para STORE)
-        if (inst.op == "STORE") {
-            // STORE nao escreve em registradores, mas o COMMIT garante que a memoria sera atualizada.
-            // A operacao de memoria (escrita) ja foi concluida no Writeback, o commit so formaliza.
-            std::cout << "  [COMMIT] STORE F" << inst.dest << " em [" << inst.address << "] formalmente Commited." << std::endl;
-        } else {
-             // Aritmetica/LOAD: O valor ja foi escrito no Register File durante o WB
-             std::cout << "  [COMMIT] " << inst.op << " " << inst.dest << " Commited. Resultado finalizado." << std::endl;
-        }
-
-    } else {
-        std::cout << "  [COMMIT] Parado: Instrucao " << inst.id << " (" << inst.op << ") nao esta pronta para commit (Estado: " << (inst.state == ISSUED ? "ISSUED" : (inst.state == EXECUTING ? "EXECUTING" : "NOT_ISSUED")) << ")" << std::endl;
     }
 }
 
@@ -408,134 +471,111 @@ void Simulator::execute() {
 }
 
 // --- Estagio de Escrita (Writeback) - ATUALIZADO E CORRIGIDO ---
+
 void Simulator::writeback() {
-    std::string cleared_rs_name = ""; 
-    
-    // CORREÇÃO: Usar um template na lambda para aceitar std::map<..., RS_Entry> ou std::map<..., LS_Entry>
-    auto find_ready = []<typename T>(std::map<std::string, T>& rs_map, bool is_ls = false) -> std::pair<std::string, double> {
-        for (auto& pair : rs_map) {
-            if (pair.second.ready_to_writeback) {
-                if (!is_ls) {
-                    return {pair.first, pair.second.result};
-                } else {
-                    // Para LS (T = LS_Entry), precisamos verificar se e LOAD ou STORE
-                    if (pair.second.op == "LOAD") {
-                        return {pair.first, pair.second.result};
-                    } else { // STORE
-                        return {pair.first, -1.0}; // -1.0 para sinalizar STORE (nao escreve CDB)
-                    }
-                }
-            }
-        }
-        return {"", 0.0};
-    };
+    // 1️⃣ Percorre todas as estações de reserva (Add/Sub e Mul/Div)
+    std::vector<std::pair<std::string, RS_Entry*>> all_rs;
+    for (auto &p : add_rs) all_rs.push_back({p.first, &p.second});
+    for (auto &p : mul_rs) all_rs.push_back({p.first, &p.second});
 
-    std::string broadcasting_rs_name = "";
-    double broadcasting_result = 0.0;
-    
-    // Chamadas corrigidas
-    auto add_result = find_ready(add_rs);
-    auto mul_result = find_ready(mul_rs);
-    auto ls_result = find_ready(ls_rs, true);
+    // 2️⃣ Escolhe uma RS aritmética pronta para escrever (CDB)
+    for (auto &[name, rs] : all_rs) {
+        if (!rs->busy) continue;
+        if (!rs->ready_to_writeback) continue;
 
-    if (!add_result.first.empty()) {
-        broadcasting_rs_name = add_result.first;
-        broadcasting_result = add_result.second;
-    } else if (!mul_result.first.empty()) {
-        broadcasting_rs_name = mul_result.first;
-        broadcasting_result = mul_result.second;
-    } else if (!ls_result.first.empty()) {
-        broadcasting_rs_name = ls_result.first;
-        broadcasting_result = ls_result.second;
-    }
-    
-    cleared_rs_name = broadcasting_rs_name;
+        int inst_id = rs->instruction_id;
+        if (inst_id < 0 || inst_id >= (int)instruction_queue.size()) continue;
+        Instruction &inst = instruction_queue[inst_id];
 
+        double result = rs->result;
+        std::string tag = name;
 
-    if (broadcasting_rs_name.empty()) {
-        std::cout << "  [WB] Ninguem transmitindo resultado." << std::endl;
-        return;
-    }
-
-    bool is_store = (cleared_rs_name.find("L/S") != std::string::npos && ls_rs[cleared_rs_name].op == "STORE");
-    
-    int inst_id = -1;
-    if (cleared_rs_name.find("L/S") == std::string::npos) {
-        // Aritmetica
-        RS_Entry& rs = (cleared_rs_name.find("Add") != std::string::npos) ? add_rs[cleared_rs_name] : mul_rs[cleared_rs_name];
-        inst_id = rs.instruction_id;
-    } else {
-        // Load/Store
-        LS_Entry& ls = ls_rs[cleared_rs_name];
-        inst_id = ls.instruction_id;
-    }
-
-    // --- 1. Acoes de Escrita Efetivas ---
-    if (is_store) {
-        // STORE: Escreve na Memoria, NÃO no CDB (por isso o result é -1.0)
-        LS_Entry& ls = ls_rs[cleared_rs_name];
-        memory[ls.calculated_address] = ls.store_value; 
-        std::cout << "  [WB] " << cleared_rs_name << " (STORE) concluido. Valor " << ls.store_value << " escrito em [" << ls.calculated_address << "]." << std::endl;
-    } else {
-        // LOAD ou Aritmetica: Transmite o resultado para o CDB e Registradores
-        std::cout << "  [WB] " << cleared_rs_name << " transmitindo resultado " << std::fixed << std::setprecision(4) << broadcasting_result << std::endl;
-
-        // Atualizar o banco de registradores (WAW protection implicita pelo reg_status)
-        for (auto& pair : reg_status) {
-            std::string reg = pair.first;
-            std::string& status = pair.second;
-            if (status == cleared_rs_name) {
-                reg_file[reg] = broadcasting_result;
-                // Vamos manter o status limpo apos a escrita para a proxima instrucao poder emitir.
-                status = ""; 
-                std::cout << "  [WB] CDB: Registrador " << reg << " atualizado e liberado (Qi limpo)." << std::endl;
-            }
-        }
-    }
-
-    // --- 2. Transmitir para todas as RSs/LSs em espera (CDB) ---
-    auto update_rs = [&](std::map<std::string, RS_Entry>& rs_map) {
-        for (auto& pair : rs_map) {
-            RS_Entry& rs = pair.second;
-            if (rs.busy && !rs.ready_to_writeback) { 
-                if (rs.qj == cleared_rs_name) { rs.vj = broadcasting_result; rs.qj = ""; }
-                if (rs.qk == cleared_rs_name) { rs.vk = broadcasting_result; rs.qk = ""; }
-            }
-        }
-    };
-    update_rs(add_rs);
-    update_rs(mul_rs);
-    
-    for (auto& pair : ls_rs) {
-        LS_Entry& ls = pair.second;
-        if (ls.busy && !ls.ready_to_writeback) {
-            if (ls.base_producer == cleared_rs_name) { ls.base_value = broadcasting_result; ls.base_producer = ""; }
-            if (ls.op == "STORE" && ls.store_producer == cleared_rs_name) { ls.store_value = broadcasting_result; ls.store_producer = ""; }
-        }
-    }
-
-    // --- 3. Limpar a RS/LS e Atualizar Estado ---
-    if (cleared_rs_name.find("L/S") == std::string::npos) {
-        // Limpar RS Aritmetica
-        RS_Entry& rs = (cleared_rs_name.find("Add") != std::string::npos) ? add_rs[cleared_rs_name] : mul_rs[cleared_rs_name];
-        rs.busy = false; rs.op = ""; rs.vj = 0.0; rs.vk = 0.0; rs.qj = ""; rs.qk = "";
-        rs.cycles_remaining = -1; rs.ready_to_writeback = false; rs.result = 0.0; rs.instruction_id = -1;
-    } else {
-        // Limpar LS Buffer
-        LS_Entry& ls = ls_rs[cleared_rs_name];
-        ls.busy = false; ls.op = ""; ls.dest_reg = ""; ls.base_reg = "";
-        ls.base_value = 0.0; ls.base_producer = ""; ls.offset = 0; ls.calculated_address = -1;
-        ls.address_ready = false; ls.store_value = 0.0; ls.store_producer = "";
-        ls.cycles_remaining = -1; ls.result = 0.0; ls.ready_to_writeback = false; ls.instruction_id = -1;
-    }
-    
-    // NOVO: Atualizar estado da instrucao para WRITE_RESULT (Pronta para Commit)
-    if (inst_id != -1) {
-        Instruction& inst = instruction_queue[inst_id];
-        inst.state = WRITE_RESULT;
+        // Guarda resultado (aguarda commit)
+        inst.value = result;
+        inst.has_value = true;
+        inst.producer_tag = tag;
         inst.write_cycle = cycle;
+        inst.state = WRITE_RESULT;
+
+        std::cout << "  [WB] " << tag << " transmitiu resultado "
+                  << std::fixed << std::setprecision(4) << result
+                  << " (aguardando commit)" << std::endl;
+
+        // Broadcast (atualiza operandos dependentes)
+        for (auto &r : add_rs) {
+            if (r.second.qj == tag) { r.second.vj = result; r.second.qj = ""; }
+            if (r.second.qk == tag) { r.second.vk = result; r.second.qk = ""; }
+        }
+        for (auto &r : mul_rs) {
+            if (r.second.qj == tag) { r.second.vj = result; r.second.qj = ""; }
+            if (r.second.qk == tag) { r.second.vk = result; r.second.qk = ""; }
+        }
+        for (auto &r : ls_rs) {
+            if (r.second.base_producer == tag) {
+                r.second.base_value = result;
+                r.second.base_producer = "";
+            }
+            if (r.second.store_producer == tag) {
+                r.second.store_value = result;
+                r.second.store_producer = "";
+            }
+        }
+
+        // Libera estação
+        rs->busy = false;
+        rs->ready_to_writeback = false;
+        rs->instruction_id = -1;
+        rs->cycles_remaining = -1;
+        rs->result = 0.0;
+        break; // apenas um broadcast por ciclo
+    }
+
+    // 3️⃣ Agora processa as estações de LOAD/STORE
+    for (auto &pair : ls_rs) {
+        LS_Entry &ls = pair.second;
+        if (!ls.busy) continue;
+        if (!ls.ready_to_writeback) continue;
+
+        int inst_id = ls.instruction_id;
+        if (inst_id < 0 || inst_id >= (int)instruction_queue.size()) continue;
+        Instruction &inst = instruction_queue[inst_id];
+
+        if (ls.op == "LOAD") {
+            inst.value = ls.result;
+            inst.has_value = true;
+            inst.producer_tag = ls.name;
+            inst.write_cycle = cycle;
+            inst.state = WRITE_RESULT;
+            std::cout << "  [WB] " << ls.name << " (LOAD) leu valor "
+                      << std::fixed << std::setprecision(4) << ls.result
+                      << " e liberou buffer" << std::endl;
+        } else if (ls.op == "STORE") {
+            // STORE não escreve nada no registrador, só sinaliza commit futuro
+            inst.value = ls.store_value;
+            inst.has_value = true;
+            inst.producer_tag = ls.name;
+            inst.write_cycle = cycle;
+            inst.state = WRITE_RESULT;
+            std::cout << "  [WB] " << ls.name << " (STORE) pronto para commit" << std::endl;
+        }
+
+        // Libera a estação L/S
+        ls.busy = false;
+        ls.op = "";
+        ls.dest_reg = "";
+        ls.base_reg = "";
+        ls.base_producer = "";
+        ls.store_producer = "";
+        ls.address_ready = false;
+        ls.ready_to_writeback = false;
+        ls.cycles_remaining = -1;
+        ls.instruction_id = -1;
+        break; // um por ciclo
     }
 }
+
+
+
 
 // --- Funcao de Checagem de Perigo de Memoria ---
 LS_Entry* Simulator::find_address_hazard(long address, const std::string& current_name) {
