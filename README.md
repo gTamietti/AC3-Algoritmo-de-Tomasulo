@@ -190,8 +190,3 @@ F8 = -30.0000
 | 132 | 10.0000 |
 | 136 | 20.0000 |
 | 1030 | -30.0000 |
-
----
-
-🧠 **Conclusão:**  
-O simulador está completamente funcional, refletindo com fidelidade todos os estágios e dependências do algoritmo de Tomasulo, com logs detalhados e rastreabilidade ciclo a ciclo — sendo uma excelente ferramenta didática e prática para o estudo de arquiteturas superescalares modernas.
